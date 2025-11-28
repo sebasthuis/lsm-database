@@ -5,17 +5,25 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 )
 
+type IndexEntry struct {
+	Key    string
+	Offset int64
+}
+
 type SSTable struct {
-	path  string
-	index map[string]int64 // key -> byte offset in file
+	path        string
+	sparseIndex []IndexEntry
 }
 
 type Entry struct {
 	Key   string
 	Value string
 }
+
+var IndexInterval = 128 // Taken from Cassandra's default sparse index interval
 
 func Write(path string, sorted []Entry) (*SSTable, error) {
 	file, err := os.Create(path)
@@ -27,12 +35,16 @@ func Write(path string, sorted []Entry) (*SSTable, error) {
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	index := make(map[string]int64)
+	sparseIndex := make([]IndexEntry, 0)
 	offset := int64(0)
 
-	for _, entry := range sorted {
-		// TODO: Change to sparse index
-		index[entry.Key] = offset
+	for i, entry := range sorted {
+		if i%IndexInterval == 0 {
+			sparseIndex = append(sparseIndex, IndexEntry{
+				Key:    entry.Key,
+				Offset: offset,
+			})
+		}
 
 		if err := writer.Write([]string{entry.Key, entry.Value}); err != nil {
 			return nil, fmt.Errorf("failed to write entry: %w", err)
@@ -50,17 +62,13 @@ func Write(path string, sorted []Entry) (*SSTable, error) {
 	}
 
 	return &SSTable{
-		path:  path,
-		index: index,
+		path:        path,
+		sparseIndex: sparseIndex,
 	}, nil
 }
 
 func (sst *SSTable) Get(key string) (string, bool, error) {
-	// TODO: Implement Sparse index
-	offset, exists := sst.index[key]
-	if !exists {
-		return "", false, nil
-	}
+	offset := sst.findOffset(key)
 
 	file, err := os.Open(sst.path)
 	if err != nil {
@@ -73,13 +81,44 @@ func (sst *SSTable) Get(key string) (string, bool, error) {
 	}
 
 	reader := csv.NewReader(file)
-	record, err := reader.Read()
-	if err != nil {
-		return "", false, fmt.Errorf("failed to read record: %w", err)
-	}
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			return "", false, nil // Reached end of file
+		}
+		if err != nil {
+			return "", false, fmt.Errorf("failed to read record: %w", err)
+		}
 
-	if len(record) != 2 {
-		return "", false, fmt.Errorf("CSV record malformed")
+		if len(record) != 2 {
+			return "", false, fmt.Errorf("malformed CSV record")
+		}
+
+		entryKey := record[0]
+		entryValue := record[1]
+
+		if entryKey == key {
+			return entryValue, true, nil
+		}
+
+		// Early termination: file is sorted, if we've passed the key, it doesn't exist
+		if entryKey > key {
+			return "", false, nil
+		}
 	}
-	return record[1], true, nil
+	// Unreachable?
+}
+
+func (sst *SSTable) findOffset(key string) int64 {
+	position := sort.Search(len(sst.sparseIndex), func(i int) bool {
+		// Easier to to identify unfound key by looking for keys greater than
+		// the target key
+		return sst.sparseIndex[i].Key > key
+	})
+
+	if position == 0 {
+		return 0
+	} else {
+		return sst.sparseIndex[position-1].Offset
+	}
 }
