@@ -2,7 +2,7 @@ package database
 
 import "sync"
 
-
+// TODO: Maintian sorted order in memtable
 
 type MemTable struct {
 	entries map[string]string
