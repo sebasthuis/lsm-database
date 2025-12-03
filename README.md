@@ -1,4 +1,4 @@
-# LSM Database
+# Alfred - LSM Database
 
 A Log-Structured Merge-tree (LSM) database implementation in Go, built from
 scratch for learning purposes.
@@ -11,3 +11,7 @@ LSM (Log-Structured Merge-tree) databases are write-optimized storage engines th
 - Flush MemTable to disk as immutable sorted string tables (SSTables) when full
 - Periodically merge and compact SSTables to maintain read performance
 - Use bloom filters and indexing for efficient reads
+
+## Name
+
+Named after Alfred Pennyworth, the butler from the Batman series.
