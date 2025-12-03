@@ -19,8 +19,9 @@ type SSTable struct {
 }
 
 type Entry struct {
-	Key   string
-	Value string
+	Key       string
+	Value     string
+	Tombstone bool
 }
 
 var IndexInterval = 128 // Taken from Cassandra's default sparse index interval
@@ -46,7 +47,12 @@ func Write(path string, sorted []Entry) (*SSTable, error) {
 			})
 		}
 
-		if err := writer.Write([]string{entry.Key, entry.Value}); err != nil {
+		tombstone := "0"
+		if entry.Tombstone {
+			tombstone = "1"
+		}
+
+		if err := writer.Write([]string{entry.Key, entry.Value, tombstone}); err != nil {
 			return nil, fmt.Errorf("failed to write entry: %w", err)
 		}
 
@@ -67,43 +73,48 @@ func Write(path string, sorted []Entry) (*SSTable, error) {
 	}, nil
 }
 
-func (sst *SSTable) Get(key string) (string, bool, error) {
+func (sst *SSTable) Get(key string) (*LookupResult, error) {
 	offset := sst.findOffset(key)
 
 	file, err := os.Open(sst.path)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to open SSTable: %w", err)
+		return nil, fmt.Errorf("failed to open SSTable: %w", err)
 	}
 	defer file.Close()
 
 	if _, err := file.Seek(offset, 0); err != nil {
-		return "", false, fmt.Errorf("failed to seek SSTable: %w", err)
+		return nil, fmt.Errorf("failed to seek SSTable: %w", err)
 	}
 
 	reader := csv.NewReader(file)
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
-			return "", false, nil // Reached end of file
+			return &LookupResult{Value: "", Status: NotFound}, nil
 		}
 		if err != nil {
-			return "", false, fmt.Errorf("failed to read record: %w", err)
+			return nil, fmt.Errorf("failed to read record: %w", err)
 		}
 
-		if len(record) != 2 {
-			return "", false, fmt.Errorf("malformed CSV record")
+		if len(record) != 3 {
+			return nil, fmt.Errorf("malformed CSV record")
 		}
 
 		entryKey := record[0]
 		entryValue := record[1]
+		entryTombstone := record[2] == "1"
 
 		if entryKey == key {
-			return entryValue, true, nil
+			if entryTombstone {
+				return &LookupResult{Value: entryValue, Status: Deleted}, nil
+			} else {
+				return &LookupResult{Value: entryValue, Status: Found}, nil
+			}
 		}
 
 		// Early termination: file is sorted, if we've passed the key, it doesn't exist
 		if entryKey > key {
-			return "", false, nil
+			return &LookupResult{Value: "", Status: NotFound}, nil
 		}
 	}
 	// Unreachable?

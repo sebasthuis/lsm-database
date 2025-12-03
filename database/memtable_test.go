@@ -6,60 +6,58 @@ import (
 	"testing"
 )
 
-func TestMemTable_PutAndGet(t *testing.T) {
+func TestMemTable_BasicOperations(t *testing.T) {
+	// Shared state for the lifecycle test
 	m := NewMemTable()
-	m.Put("apple", "red")
 
-	val, found := m.Get("apple")
-	if !found {
-		t.Error("Expected key 'apple' to be found")
-	}
-	if val != "red" {
-		t.Errorf("Expected value 'red', got %q", val)
-	}
-}
+	t.Run("1. Put and Get new key", func(t *testing.T) {
+		m.Put("apple", "red")
 
-func TestMemTable_Update(t *testing.T) {
-	m := NewMemTable()
-	m.Put("apple", "red")
-	m.Put("apple", "green")
+		result := m.Get("apple")
+		if result.Status != Found {
+			t.Error("Expected key 'apple' to be found")
+		}
+		if result.Value != "red" {
+			t.Errorf("Expected value 'red', got %q", result.Value)
+		}
+	})
 
-	val, found := m.Get("apple")
-	if !found {
-		t.Error("Expected key 'apple' to be found")
-	}
-	if val != "green" {
-		t.Errorf("Expected value 'green', got %q", val)
-	}
-}
+	t.Run("2. Update existing key", func(t *testing.T) {
+		m.Put("apple", "green")
 
-func TestMemTable_GetNonExistent(t *testing.T) {
-	m := NewMemTable()
-	_, found := m.Get("banana")
-	if found {
-		t.Error("Expected key 'banana' not to be found")
-	}
-}
+		result := m.Get("apple")
+		if result.Status != Found {
+			t.Error("Expected key 'apple' to be found")
+		}
+		if result.Value != "green" {
+			t.Errorf("Expected value 'green', got %q", result.Value)
+		}
+	})
 
-func TestMemTable_Delete(t *testing.T) {
-	m := NewMemTable()
-	m.Put("apple", "red")
-	m.Delete("apple")
+	t.Run("3. Get non-existent key", func(t *testing.T) {
+		result := m.Get("banana")
+		if result.Status != NotFound {
+			t.Error("Expected key 'banana' not to be found")
+		}
+	})
 
-	_, found := m.Get("apple")
-	if found {
-		t.Error("Expected key 'apple' to be deleted")
-	}
-}
+	t.Run("4. Delete key", func(t *testing.T) {
+		m.Delete("apple")
 
-func TestMemTable_DeleteNonExistent(t *testing.T) {
-	m := NewMemTable()
-	m.Delete("ghost") // Should not panic
+		result := m.Get("apple")
+		if result.Status != Deleted {
+			t.Errorf("Expected key 'apple' to be Deleted, got %v", result.Status)
+		}
+	})
 
-	_, found := m.Get("ghost")
-	if found {
-		t.Error("Expected key 'ghost' to remain not found")
-	}
+	t.Run("5. Delete non-existent key", func(t *testing.T) {
+		m.Delete("ghost") // Should not panic
+
+		result := m.Get("ghost")
+		if result.Status != NotFound {
+			t.Errorf("Expected key 'ghost' to remain NotFound, got %v", result.Status)
+		}
+	})
 }
 
 func TestMemTable_LargeDataset(t *testing.T) {
@@ -80,121 +78,129 @@ func TestMemTable_LargeDataset(t *testing.T) {
 		key := fmt.Sprintf("key-%05d", i)
 		wantVal := fmt.Sprintf("val-%05d", i)
 
-		gotVal, found := m.Get(key)
-		if !found {
+		result := m.Get(key)
+		if result.Status != Found {
 			t.Fatalf("Get(%q) not found", key)
 		}
-		if gotVal != wantVal {
-			t.Fatalf("Get(%q) = %q, want %q", key, gotVal, wantVal)
+		if result.Value != wantVal {
+			t.Fatalf("Get(%q) = %q, want %q", key, result.Value, wantVal)
 		}
 	}
 
 	// Verify non-existence
-	_, found := m.Get("key-99999")
-	if found {
+	result := m.Get("key-99999")
+	if result.Status != NotFound {
 		t.Error("Found non-existent key")
 	}
 }
 
 func TestMemTable_Concurrency(t *testing.T) {
-	// Stresstest RWMutex locks
-	m := NewMemTable()
-	var wg sync.WaitGroup
-	workers := 10
-	opsPerWorker := 100
+	t.Run("ReadWrite", func(t *testing.T) {
+		m := NewMemTable()
+		var wg sync.WaitGroup
+		workers := 10
+		opsPerWorker := 100
 
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-			for j := 0; j < opsPerWorker; j++ {
-				key := fmt.Sprintf("k-%d-%d", workerID, j)
-				val := fmt.Sprintf("v-%d-%d", workerID, j)
+		for i := 0; i < workers; i++ {
+			wg.Add(1)
+			go func(workerID int) {
+				defer wg.Done()
+				for j := 0; j < opsPerWorker; j++ {
+					key := fmt.Sprintf("k-%d-%d", workerID, j)
+					val := fmt.Sprintf("v-%d-%d", workerID, j)
 
-				m.Put(key, val)
+					m.Put(key, val)
 
-				// Immediate read-back check
-				got, found := m.Get(key)
-				if !found || got != val {
-					t.Errorf("Concurrent consistency failure: key=%s", key)
+					// Immediate read-back check
+					result := m.Get(key)
+					if result.Status != Found || result.Value != val {
+						t.Errorf("Concurrent consistency failure: key=%s", key)
+					}
 				}
-			}
-		}(i)
-	}
+			}(i)
+		}
+		wg.Wait()
+	})
 
-	wg.Wait()
-}
+	t.Run("SharedKey", func(t *testing.T) {
+		m := NewMemTable()
+		var wg sync.WaitGroup
+		workers := 10
+		opsPerWorker := 100
 
-func TestMemTable_ConcurrentSharedKey(t *testing.T) {
-	// This tests multiple workers updating the SAME key to ensure
-	// we don't corrupt the specific node or the list structure.
-	m := NewMemTable()
-	var wg sync.WaitGroup
-	workers := 10
-	opsPerWorker := 100
-
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			for j := 0; j < opsPerWorker; j++ {
-				// Everyone writes to "shared-key"
-				val := fmt.Sprintf("val-%d-%d", id, j)
-				m.Put("shared-key", val)
-			}
-		}(i)
-	}
-
-	wg.Wait()
-
-	// Final check: The key should exist and have a valid value
-	val, found := m.Get("shared-key")
-	if !found {
-		t.Error("Expected 'shared-key' to exist after concurrent writes")
-	}
-	if len(val) == 0 {
-		t.Error("Expected 'shared-key' to have a value")
-	}
-}
-
-func TestMemTable_ConcurrentMixedWorkload(t *testing.T) {
-	// Separate readers and writers to simulate a real database workload
-	m := NewMemTable()
-	var wg sync.WaitGroup
-
-	// Pre-populate
-	for i := 0; i < 100; i++ {
-		m.Put(fmt.Sprintf("key-%d", i), "initial")
-	}
-
-	// 5 Writers
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
-				key := fmt.Sprintf("key-%d", j) // Overwrite existing keys
-				m.Put(key, fmt.Sprintf("writer-%d-val-%d", id, j))
-			}
-		}(i)
-	}
-
-	// 5 Readers
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
-				key := fmt.Sprintf("key-%d", j)
-				_, found := m.Get(key)
-				if !found {
-					// In this specific test setup, keys are never deleted,
-					// so a 'not found' is a bug (race condition or logic error).
-					t.Errorf("Reader failed to find key %s", key)
+		for i := 0; i < workers; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < opsPerWorker; j++ {
+					// Everyone writes to "shared-key"
+					val := fmt.Sprintf("val-%d-%d", id, j)
+					m.Put("shared-key", val)
 				}
-			}
-		}()
-	}
+			}(i)
+		}
+		wg.Wait()
 
-	wg.Wait()
+		// Final check: The key should exist and have a valid value
+		result := m.Get("shared-key")
+		if result.Status != Found {
+			t.Error("Expected 'shared-key' to exist after concurrent writes")
+		}
+		if len(result.Value) == 0 {
+			t.Error("Expected 'shared-key' to have a value")
+		}
+	})
+
+	t.Run("MixedWorkload", func(t *testing.T) {
+		m := NewMemTable()
+		var wg sync.WaitGroup
+
+		// Pre-populate
+		for i := 0; i < 100; i++ {
+			m.Put(fmt.Sprintf("key-%d", i), "initial")
+		}
+
+		// 5 Writers
+		for i := 0; i < 5; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					key := fmt.Sprintf("key-%d", j) // Overwrite existing keys
+					m.Put(key, fmt.Sprintf("writer-%d-val-%d", id, j))
+				}
+			}(i)
+		}
+
+		// 2 Deleters
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					if j%2 == 0 { // Delete even keys
+						key := fmt.Sprintf("key-%d", j)
+						m.Delete(key)
+					}
+				}
+			}(i)
+		}
+
+		// 5 Readers
+		for i := 0; i < 5; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					key := fmt.Sprintf("key-%d", j)
+					result := m.Get(key)
+
+					if result.Status == NotFound {
+						t.Errorf("Reader failed to find key %s (got NotFound, expected Found or Deleted)", key)
+					}
+				}
+			}()
+		}
+		wg.Wait()
+	})
 }
