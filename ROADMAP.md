@@ -1,0 +1,11 @@
+- Merging of SSTables including meta abstraction, just compact all
+- Write ahead log
+- Recovery memtable at restart
+- Recovery sstables at restart
+- Bloom filter
+- Use allocated chunks of memory instead of counting size
+- Server interface instead of CLI
+- Replication log
+- Add types
+- Store information in binary
+- More intelligent compaction (LevelDB, L0, L1, etc) or size tiered

@@ -2,10 +2,7 @@ package database
 
 import (
 	"errors"
-	"fmt"
-	"path/filepath"
 	"sync"
-	"time"
 )
 
 // 4MB is a common default (used by LevelDB).
@@ -17,17 +14,15 @@ type Database struct {
 	mutable *MemTable
 	// Snapshot before table gets flushed to disk
 	immutable *MemTable
-	sstables  []*SSTable
-	directory string
+	disk      *SSTables
 	// lock protects the memTable pointer for concurrent access and swapping
 	lock sync.RWMutex
 }
 
 func Create(directory string) (*Database, error) {
 	return &Database{
-		mutable:   NewMemTable(),
-		sstables:  make([]*SSTable, 0),
-		directory: directory,
+		mutable: NewMemTable(),
+		disk:    NewSSTables(directory),
 	}, nil
 }
 
@@ -58,18 +53,16 @@ func (db *Database) Get(key string) (string, error) {
 			return result.Value, nil
 		}
 	}
+	db.lock.RUnlock() // Only needs to guard
 
-	for i := len(db.sstables) - 1; i >= 0; i-- {
-		result, err := db.sstables[i].Get(key)
-		if err != nil {
-			return "", fmt.Errorf("error reading sstable: %w", err)
-		}
-		if result.Status == Found {
-			return result.Value, nil
-		}
+	value, found, err := db.disk.Get(key)
+	if err != nil {
+		return "", err
+	} else if found {
+		return value, nil
+	} else {
+		return "", ErrKeyNotFound
 	}
-
-	return "", ErrKeyNotFound
 }
 
 func (db *Database) Delete(key string) error {
@@ -81,32 +74,33 @@ func (db *Database) Delete(key string) error {
 }
 
 func (db *Database) flush() error {
-	db.lock.Lock()
+	// db.lock.Lock()
 
-	// Double-check: Another thread might have flushed while we were waiting for the lock
-	if db.mutable.size < FlushThreshold {
-		db.lock.Unlock()
-		return nil
-	}
+	// // Double-check: Another thread might have flushed while we were waiting for the lock
+	// if db.mutable.size < FlushThreshold {
+	// 	db.lock.Unlock()
+	// 	return nil
+	// }
 
-	db.immutable = db.mutable
-	db.mutable = NewMemTable()
+	// db.immutable = db.mutable
+	// db.mutable = NewMemTable()
 
-	db.lock.Unlock()
+	// db.lock.Unlock()
 
-	entries := db.immutable.All()
-	filename := fmt.Sprintf("sstable-%d.csv", time.Now().UnixNano())
-	path := filepath.Join(db.directory, filename)
+	// entries := db.immutable.All()
+	// // TODO: Needs to be moved into separate function inside the SSTables
+	// filename := fmt.Sprintf("sstable-%d.csv", time.Now().UnixNano())
+	// path := filepath.Join(db.directory, filename)
 
-	sstable, err := Write(path, entries)
-	if err != nil {
-		return fmt.Errorf("failed to write SSTable: %w", err)
-	}
+	// sstable, err := Write(path, entries)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to write SSTable: %w", err)
+	// }
 
-	db.lock.Lock()
-	db.sstables = append(db.sstables, sstable)
-	db.immutable = nil
-	db.lock.Unlock()
+	// db.lock.Lock()
+	// db.sstables = append(db.sstables, sstable)
+	// db.immutable = nil
+	// db.lock.Unlock()
 
 	return nil
 }

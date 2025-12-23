@@ -8,6 +8,8 @@ import (
 	"sort"
 )
 
+const IndexInterval = 128 // Taken from Cassandra's default sparse index interval
+
 type IndexEntry struct {
 	Key    string
 	Offset int64
@@ -17,14 +19,6 @@ type SSTable struct {
 	path        string
 	sparseIndex []IndexEntry
 }
-
-type Entry struct {
-	Key       string
-	Value     string
-	Tombstone bool
-}
-
-var IndexInterval = 128 // Taken from Cassandra's default sparse index interval
 
 func Write(path string, sorted []Entry) (*SSTable, error) {
 	file, err := os.Create(path)
@@ -73,7 +67,7 @@ func Write(path string, sorted []Entry) (*SSTable, error) {
 	}, nil
 }
 
-func (sst *SSTable) Get(key string) (*LookupResult, error) {
+func (sst *SSTable) Lookup(key string) (*LookupResult, error) {
 	offset := sst.findOffset(key)
 
 	file, err := os.Open(sst.path)
