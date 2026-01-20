@@ -26,6 +26,8 @@ type Entry struct {
 
 var IndexInterval = 128 // Taken from Cassandra's default sparse index interval
 
+// TODO: Split up into packages, the name space is getting messy with SSTable and
+// SSTables. Maybe "WriteTable"
 func Write(path string, sorted []Entry) (*SSTable, error) {
 	file, err := os.Create(path)
 	if err != nil {

@@ -3,9 +3,7 @@ package database
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sync"
-	"time"
 )
 
 // 4MB is a common default (used by LevelDB).
@@ -14,20 +12,22 @@ const FlushThreshold = 4 * 1024 * 1024
 var ErrKeyNotFound = errors.New("key not found")
 
 type Database struct {
+	// TODO: Change naming for mutable and immutable. I think it should be clearer
+	// that one of them is the active memtable and the other is a temporary
+	// placeholder.
 	mutable *MemTable
 	// Snapshot before table gets flushed to disk
 	immutable *MemTable
-	sstables  []*SSTable
-	directory string
+	sstables  *SSTables
 	// lock protects the memTable pointer for concurrent access and swapping
+	// TODO: Add here that it is just used for swapping the memtables.
 	lock sync.RWMutex
 }
 
 func Create(directory string) (*Database, error) {
 	return &Database{
-		mutable:   NewMemTable(),
-		sstables:  make([]*SSTable, 0),
-		directory: directory,
+		mutable:  NewMemTable(),
+		sstables: NewSSTables(directory),
 	}, nil
 }
 
@@ -59,14 +59,14 @@ func (db *Database) Get(key string) (string, error) {
 		}
 	}
 
-	for i := len(db.sstables) - 1; i >= 0; i-- {
-		result, err := db.sstables[i].Get(key)
-		if err != nil {
-			return "", fmt.Errorf("error reading sstable: %w", err)
-		}
-		if result.Status == Found {
-			return result.Value, nil
-		}
+	// TODO: If I would like the error to bubble up, how would I do that here?
+	tableResult, err := db.sstables.Get(key)
+	if err != nil {
+		return "", err
+	}
+
+	if tableResult.Status == Found {
+		return tableResult.Value, nil
 	}
 
 	return "", ErrKeyNotFound
@@ -95,16 +95,13 @@ func (db *Database) flush() error {
 	db.lock.Unlock()
 
 	entries := db.immutable.All()
-	filename := fmt.Sprintf("sstable-%d.csv", time.Now().UnixNano())
-	path := filepath.Join(db.directory, filename)
 
-	sstable, err := Write(path, entries)
+	err := db.sstables.Write(entries)
 	if err != nil {
 		return fmt.Errorf("failed to write SSTable: %w", err)
 	}
 
 	db.lock.Lock()
-	db.sstables = append(db.sstables, sstable)
 	db.immutable = nil
 	db.lock.Unlock()
 
