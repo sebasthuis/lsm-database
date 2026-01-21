@@ -7,17 +7,17 @@ import (
 	"time"
 )
 
-type SSTables struct {
+type Level struct {
 	directory string
-	tables    []*SSTable // Most recent at end
-	lock      sync.RWMutex
+	tables    []*SSTable   // Stack; Most recent appended at the end
+	lock      sync.RWMutex // Lock for `tables` pointer
 }
 
-func NewSSTables(directory string) *SSTables {
-	return &SSTables{directory: directory, tables: make([]*SSTable, 0)}
+func NewLevel(directory string) *Level {
+	return &Level{directory: directory, tables: make([]*SSTable, 0)}
 }
 
-func (s *SSTables) Get(key string) (*LookupResult, error) {
+func (s *Level) Get(key string) (*LookupResult, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
@@ -38,17 +38,13 @@ func (s *SSTables) Get(key string) (*LookupResult, error) {
 	return &LookupResult{Status: NotFound, Value: ""}, nil
 }
 
-// TODO: Rename and package differently, so that namespace isn't too messy. This
-// write is thankfully only called on the SSTables abstraction.
-func (s *SSTables) Write(sorted []Entry) error {
-	// 1. Write to disk without holding the lock
-	// This ensures that reads (Get) are not blocked by slow I/O
-	table, err := Write(s.createFilePath(), sorted)
+func (s *Level) Write(snapshot []Entry) error {
+	path := s.createFilePath()
+	table, err := Write(path, snapshot)
 	if err != nil {
 		return err
 	}
 
-	// 2. Lock only for the pointer memory operation
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -56,7 +52,7 @@ func (s *SSTables) Write(sorted []Entry) error {
 	return nil
 }
 
-func (s *SSTables) createFilePath() string {
+func (s *Level) createFilePath() string {
 	return filepath.Join(s.directory, createFileName())
 }
 

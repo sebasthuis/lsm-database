@@ -18,7 +18,7 @@ type Database struct {
 	mutable *MemTable
 	// Snapshot before table gets flushed to disk
 	immutable *MemTable
-	sstables  *SSTables
+	sstables  *Level
 	// lock protects the memTable pointer for concurrent access and swapping
 	// TODO: Add here that it is just used for swapping the memtables.
 	lock sync.RWMutex
@@ -27,7 +27,7 @@ type Database struct {
 func Create(directory string) (*Database, error) {
 	return &Database{
 		mutable:  NewMemTable(),
-		sstables: NewSSTables(directory),
+		sstables: NewLevel(directory),
 	}, nil
 }
 

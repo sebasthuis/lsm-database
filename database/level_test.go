@@ -7,12 +7,12 @@ import (
 	"testing"
 )
 
-func TestSSTables_NewSSTables(t *testing.T) {
+func TestLevel_NewLevel(t *testing.T) {
 	tempDir := t.TempDir()
-	tables := NewSSTables(tempDir)
+	tables := NewLevel(tempDir)
 
 	if tables == nil {
-		t.Fatal("NewSSTables returned nil")
+		t.Fatal("NewLevel returned nil")
 	}
 
 	if tables.directory != tempDir {
@@ -24,9 +24,9 @@ func TestSSTables_NewSSTables(t *testing.T) {
 	}
 }
 
-func TestSSTables_GetFromEmpty(t *testing.T) {
+func TestLevel_GetFromEmpty(t *testing.T) {
 	tempDir := t.TempDir()
-	tables := NewSSTables(tempDir)
+	tables := NewLevel(tempDir)
 
 	result, err := tables.Get("anykey")
 	if err != nil {
@@ -42,9 +42,9 @@ func TestSSTables_GetFromEmpty(t *testing.T) {
 	}
 }
 
-func TestSSTables_WriteAndGet(t *testing.T) {
+func TestLevel_WriteAndGet(t *testing.T) {
 	tempDir := t.TempDir()
-	tables := NewSSTables(tempDir)
+	tables := NewLevel(tempDir)
 
 	entries := []Entry{
 		{Key: "apple", Value: "red"},
@@ -86,9 +86,9 @@ func TestSSTables_WriteAndGet(t *testing.T) {
 	}
 }
 
-func TestSSTables_NewerTableTakesPrecedence(t *testing.T) {
+func TestLevel_NewerTableTakesPrecedence(t *testing.T) {
 	tempDir := t.TempDir()
-	tables := NewSSTables(tempDir)
+	tables := NewLevel(tempDir)
 
 	// Write first table with initial values
 	err := tables.Write([]Entry{
@@ -132,9 +132,9 @@ func TestSSTables_NewerTableTakesPrecedence(t *testing.T) {
 	}
 }
 
-func TestSSTables_TombstoneShadowsOlderValue(t *testing.T) {
+func TestLevel_TombstoneShadowsOlderValue(t *testing.T) {
 	tempDir := t.TempDir()
-	tables := NewSSTables(tempDir)
+	tables := NewLevel(tempDir)
 
 	// Write first table with value
 	err := tables.Write([]Entry{
@@ -171,9 +171,9 @@ func TestSSTables_TombstoneShadowsOlderValue(t *testing.T) {
 	}
 }
 
-func TestSSTables_MultipleTablesSearchOrder(t *testing.T) {
+func TestLevel_MultipleTablesSearchOrder(t *testing.T) {
 	tempDir := t.TempDir()
-	tables := NewSSTables(tempDir)
+	tables := NewLevel(tempDir)
 
 	// Create 5 tables, each with a unique key and one shared key
 	for i := 0; i < 5; i++ {
@@ -221,9 +221,9 @@ func TestSSTables_MultipleTablesSearchOrder(t *testing.T) {
 	}
 }
 
-func TestSSTables_ConcurrentReads(t *testing.T) {
+func TestLevel_ConcurrentReads(t *testing.T) {
 	tempDir := t.TempDir()
-	tables := NewSSTables(tempDir)
+	tables := NewLevel(tempDir)
 
 	// Write some data
 	entries := make([]Entry, 100)
@@ -272,9 +272,9 @@ func TestSSTables_ConcurrentReads(t *testing.T) {
 	}
 }
 
-func TestSSTables_ConcurrentReadsAndWrites(t *testing.T) {
+func TestLevel_ConcurrentReadsAndWrites(t *testing.T) {
 	tempDir := t.TempDir()
-	tables := NewSSTables(tempDir)
+	tables := NewLevel(tempDir)
 
 	// Pre-populate with initial data
 	initialEntries := []Entry{
@@ -326,9 +326,9 @@ func TestSSTables_ConcurrentReadsAndWrites(t *testing.T) {
 	}
 }
 
-func TestSSTables_WriteCreatesFile(t *testing.T) {
+func TestLevel_WriteCreatesFile(t *testing.T) {
 	tempDir := t.TempDir()
-	tables := NewSSTables(tempDir)
+	tables := NewLevel(tempDir)
 
 	entries := []Entry{
 		{Key: "key", Value: "value"},

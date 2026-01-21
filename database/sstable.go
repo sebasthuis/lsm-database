@@ -33,11 +33,13 @@ func Write(path string, sorted []Entry) (*SSTable, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create SSTable file: %w", err)
 	}
-	defer file.Close()
+
+	cleanup := func() {
+		file.Close()
+		os.Remove(path)
+	}
 
 	writer := csv.NewWriter(file)
-	defer writer.Flush()
-
 	sparseIndex := make([]IndexEntry, 0)
 	offset := int64(0)
 
@@ -55,6 +57,7 @@ func Write(path string, sorted []Entry) (*SSTable, error) {
 		}
 
 		if err := writer.Write([]string{entry.Key, entry.Value, tombstone}); err != nil {
+			cleanup()
 			return nil, fmt.Errorf("failed to write entry: %w", err)
 		}
 
@@ -63,10 +66,17 @@ func Write(path string, sorted []Entry) (*SSTable, error) {
 
 		newOffset, err := file.Seek(0, io.SeekCurrent)
 		if err != nil {
+			cleanup()
 			return nil, err
 		}
 
 		offset = newOffset
+	}
+
+	writer.Flush()
+	if err := file.Close(); err != nil {
+		os.Remove(path)
+		return nil, fmt.Errorf("failed to close SSTable file: %w", err)
 	}
 
 	return &SSTable{
